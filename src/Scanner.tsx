@@ -31,7 +31,39 @@ function parseQRData(rawText: string): Record<string, string> | string {
     return data;
   }
 
-  // 3. Parse Generic Key:Value text (e.g., Line 1: Data 1 \n Line 2: Data 2)
+  // 3. Parse XML Data (Official documents, Demographics, etc.)
+  if (rawText.trim().startsWith('<?xml') || rawText.trim().startsWith('<')) {
+    try {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(rawText, "text/xml");
+      
+      if (!xmlDoc.querySelector('parsererror')) {
+        data['Data Type'] = 'Structured Document';
+        const elements = xmlDoc.getElementsByTagName('*');
+        let isStructured = false;
+        
+        for (let i = 0; i < elements.length; i++) {
+          const el = elements[i];
+          // Only grab leaf nodes (elements that contain text, not other elements)
+          if (el.children.length === 0 && el.textContent && el.textContent !== 'NA') {
+            // Convert camelCase tags like 'fileNumber' to 'File Number'
+            const formattedKey = el.tagName
+              .replace(/([A-Z])/g, ' $1')
+              .replace(/^./, str => str.toUpperCase())
+              .trim();
+            
+            data[formattedKey] = el.textContent;
+            isStructured = true;
+          }
+        }
+        if (isStructured) return data;
+      }
+    } catch (e) {
+      // If parsing fails, fall through to raw text
+    }
+  }
+
+  // 4. Parse Generic Key:Value text
   if (rawText.includes(':') && rawText.includes('\n')) {
     const lines = rawText.split('\n');
     let isStructured = false;
@@ -49,7 +81,6 @@ function parseQRData(rawText: string): Record<string, string> | string {
     if (isStructured && Object.keys(data).length > 1) return data;
   }
 
-  // If it's just a standard URL or plain text, return as-is
   return rawText;
 }
 
@@ -96,7 +127,7 @@ export default function Scanner() {
           try {
             const results = await readBarcodesFromImageData(imageData);
             if (results && results.length > 0) {
-              if ('vibrate' in navigator) navigator.vibrate([200]); // Haptic feedback
+              if ('vibrate' in navigator) navigator.vibrate([200]);
               setScanResult(results[0].text);
               setIsScanning(false);
             }
@@ -153,7 +184,6 @@ export default function Scanner() {
               <CheckCircle className="w-4 h-4" /> <span>Scan Successful</span>
             </div>
             
-            {/* Display formatted objects or plain text */}
             <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 max-h-48 overflow-y-auto">
               {typeof parsedData === 'object' ? (
                 <div className="flex flex-col gap-2">
