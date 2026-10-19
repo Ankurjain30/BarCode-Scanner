@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCw, CheckCircle, AlertCircle, Copy, ExternalLink, Check, AlignLeft } from 'lucide-react';
+import { Camera, RefreshCw, CheckCircle, AlertCircle, Copy, ExternalLink, Check, AlignLeft, History, Trash2, X } from 'lucide-react';
 import { readBarcodesFromImageData } from 'zxing-wasm';
 
 // Helper to parse complex QR formats into clean Key-Value pairs
 function parseQRData(rawText: string): Record<string, string> | string {
   const data: Record<string, string> = {};
 
-  // 1. Parse Wi-Fi
   if (rawText.startsWith('WIFI:')) {
     const parts = rawText.replace('WIFI:', '').split(';');
     data['Data Type'] = 'Wi-Fi Network';
@@ -18,7 +17,6 @@ function parseQRData(rawText: string): Record<string, string> | string {
     return data;
   }
 
-  // 2. Parse Contact Cards (MECARD)
   if (rawText.startsWith('MECARD:')) {
     const parts = rawText.replace('MECARD:', '').split(';');
     data['Data Type'] = 'Contact Card';
@@ -31,39 +29,27 @@ function parseQRData(rawText: string): Record<string, string> | string {
     return data;
   }
 
-  // 3. Parse XML Data (Official documents, Demographics, etc.)
   if (rawText.trim().startsWith('<?xml') || rawText.trim().startsWith('<')) {
     try {
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(rawText, "text/xml");
-      
       if (!xmlDoc.querySelector('parsererror')) {
         data['Data Type'] = 'Structured Document';
         const elements = xmlDoc.getElementsByTagName('*');
         let isStructured = false;
-        
         for (let i = 0; i < elements.length; i++) {
           const el = elements[i];
-          // Only grab leaf nodes (elements that contain text, not other elements)
           if (el.children.length === 0 && el.textContent && el.textContent !== 'NA') {
-            // Convert camelCase tags like 'fileNumber' to 'File Number'
-            const formattedKey = el.tagName
-              .replace(/([A-Z])/g, ' $1')
-              .replace(/^./, str => str.toUpperCase())
-              .trim();
-            
+            const formattedKey = el.tagName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim();
             data[formattedKey] = el.textContent;
             isStructured = true;
           }
         }
         if (isStructured) return data;
       }
-    } catch (e) {
-      // If parsing fails, fall through to raw text
-    }
+    } catch (e) { /* fallback */ }
   }
 
-  // 4. Parse Generic Key:Value text
   if (rawText.includes(':') && rawText.includes('\n')) {
     const lines = rawText.split('\n');
     let isStructured = false;
@@ -91,6 +77,32 @@ export default function Scanner() {
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
+  
+  // History State
+  const [history, setHistory] = useState<string[]>([]);
+  const [showHistory, setShowHistory] = useState<boolean>(false);
+
+  // Load history on startup
+  useEffect(() => {
+    const saved = localStorage.getItem('scannerHistory');
+    if (saved) {
+      try { setHistory(JSON.parse(saved)); } catch (e) { }
+    }
+  }, []);
+
+  const saveToHistory = (newScan: string) => {
+    setHistory(prev => {
+      // Remove duplicate if it exists, add to front, keep only last 10
+      const updated = [newScan, ...prev.filter(item => item !== newScan)].slice(0, 10);
+      localStorage.setItem('scannerHistory', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem('scannerHistory');
+  };
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -105,14 +117,14 @@ export default function Scanner() {
         console.error(err);
       }
     }
-    if (isScanning) startCamera();
+    if (isScanning && !showHistory) startCamera();
     return () => stream?.getTracks().forEach(t => t.stop());
-  }, [isScanning]);
+  }, [isScanning, showHistory]);
 
   useEffect(() => {
     let animationFrameId: number;
     async function scanFrame() {
-      if (!isScanning) return;
+      if (!isScanning || showHistory) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
@@ -128,42 +140,41 @@ export default function Scanner() {
             const results = await readBarcodesFromImageData(imageData);
             if (results && results.length > 0) {
               if ('vibrate' in navigator) navigator.vibrate([200]);
-              setScanResult(results[0].text);
+              const text = results[0].text;
+              setScanResult(text);
+              saveToHistory(text); // Save to local storage
               setIsScanning(false);
             }
-          } catch (e: any) {
-             // Ignore frame errors silently
-          }
+          } catch (e: any) {}
         }
       }
-      if (isScanning) animationFrameId = requestAnimationFrame(scanFrame);
+      if (isScanning && !showHistory) animationFrameId = requestAnimationFrame(scanFrame);
     }
-    if (isScanning) animationFrameId = requestAnimationFrame(scanFrame);
+    if (isScanning && !showHistory) animationFrameId = requestAnimationFrame(scanFrame);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [isScanning]);
+  }, [isScanning, showHistory]);
 
-  const copyToClipboard = async () => {
-    if (scanResult) {
-      await navigator.clipboard.writeText(scanResult);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+  const copyToClipboard = async (textToCopy: string) => {
+    await navigator.clipboard.writeText(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const parsedData = scanResult ? parseQRData(scanResult) : null;
   const isUrl = scanResult?.startsWith('http://') || scanResult?.startsWith('https://');
 
   return (
-    <div className="flex flex-col items-center justify-between min-h-screen bg-slate-950 text-white p-4">
+    <div className="flex flex-col items-center justify-between min-h-screen bg-slate-950 text-white p-4 relative">
       <header className="my-2 text-center">
         <h1 className="text-xl font-bold flex items-center justify-center gap-2 text-slate-100">
-          <Camera className="w-5 h-5 text-purple-400" /> Universal PWA Scanner
+          <Camera className="w-5 h-5 text-purple-400" /> Universal Scanner
         </h1>
         <p className="text-slate-400 text-xs mt-0.5">Point camera at any barcode or QR code</p>
       </header>
 
       <canvas ref={canvasRef} className="hidden" />
 
+      {/* Main Scanner Window */}
       <div className="relative w-full max-w-sm aspect-square bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 my-auto">
         <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
         <div className="absolute inset-0 border-[28px] border-black/50 flex items-center justify-center pointer-events-none">
@@ -177,7 +188,8 @@ export default function Scanner() {
         )}
       </div>
 
-      <div className="w-full max-w-sm mb-4">
+      {/* Scan Results Panel */}
+      <div className="w-full max-w-sm mb-14">
         {scanResult && parsedData ? (
           <div className="bg-slate-900 border border-purple-500/50 p-4 rounded-xl shadow-lg flex flex-col gap-3">
             <div className="flex items-center gap-2 text-purple-400 font-semibold text-sm">
@@ -205,9 +217,9 @@ export default function Scanner() {
             </div>
 
             <div className="flex gap-2">
-              <button onClick={copyToClipboard} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm border border-slate-700">
+              <button onClick={() => copyToClipboard(scanResult)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm border border-slate-700">
                 {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                {copied ? 'Copied All' : 'Copy'}
+                {copied ? 'Copied' : 'Copy'}
               </button>
               {isUrl && (
                 <a href={scanResult} target="_blank" rel="noopener noreferrer" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm">
@@ -224,6 +236,61 @@ export default function Scanner() {
           <div className="text-center text-slate-500 text-xs py-2">Engine active • Scanning frames...</div>
         )}
       </div>
+
+      {/* Floating History Button */}
+      {!scanResult && (
+        <button 
+          onClick={() => setShowHistory(true)}
+          className="absolute bottom-6 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-full px-5 py-2.5 flex items-center gap-2 text-sm font-medium shadow-lg transition"
+        >
+          <History className="w-4 h-4 text-purple-400" /> View History
+        </button>
+      )}
+
+      {/* History Modal Overlay */}
+      {showHistory && (
+        <div className="absolute inset-0 z-50 bg-slate-950/95 flex flex-col p-4 animate-in fade-in slide-in-from-bottom-8 duration-200">
+          <div className="flex items-center justify-between mt-2 mb-6">
+            <h2 className="text-xl font-bold flex items-center gap-2 text-slate-100">
+              <History className="w-5 h-5 text-purple-400" /> Recent Scans
+            </h2>
+            <button onClick={() => setShowHistory(false)} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto flex flex-col gap-3">
+            {history.length === 0 ? (
+              <div className="text-center text-slate-500 mt-10 text-sm">No scans yet.</div>
+            ) : (
+              history.map((item, idx) => {
+                const isItemUrl = item.startsWith('http');
+                return (
+                  <div key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col gap-2">
+                    <p className="text-sm font-mono text-slate-300 break-all line-clamp-2">{item}</p>
+                    <div className="flex gap-2 mt-1">
+                      <button onClick={() => copyToClipboard(item)} className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded flex items-center gap-1.5 text-slate-300">
+                        <Copy className="w-3.5 h-3.5" /> Copy
+                      </button>
+                      {isItemUrl && (
+                        <a href={item} target="_blank" rel="noopener noreferrer" className="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 px-3 py-1.5 rounded flex items-center gap-1.5">
+                          <ExternalLink className="w-3.5 h-3.5" /> Open
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {history.length > 0 && (
+            <button onClick={clearHistory} className="mt-4 w-full flex items-center justify-center gap-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 py-3 rounded-xl font-medium text-sm transition">
+              <Trash2 className="w-4 h-4" /> Clear All History
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
