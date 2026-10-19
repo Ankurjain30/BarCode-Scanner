@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCw, CheckCircle, AlertCircle, Copy, ExternalLink, Check, AlignLeft, History, Trash2, X } from 'lucide-react';
+import { Camera, RefreshCw, CheckCircle, AlertCircle, Copy, ExternalLink, Check, AlignLeft, History, Trash2, X, Share } from 'lucide-react';
 import { readBarcodesFromImageData } from 'zxing-wasm';
 
 // Helper to parse complex QR formats into clean Key-Value pairs
@@ -70,6 +70,18 @@ function parseQRData(rawText: string): Record<string, string> | string {
   return rawText;
 }
 
+// Helper to format the parsed object into a clean string for Clipboard/Sharing
+function formatForExport(rawText: string): string {
+  const parsed = parseQRData(rawText);
+  if (typeof parsed === 'object') {
+    return Object.entries(parsed)
+      .filter(([_, val]) => val) // Skip empty values
+      .map(([key, val]) => `${key}:\n${val}`)
+      .join('\n\n');
+  }
+  return parsed;
+}
+
 export default function Scanner() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -82,7 +94,6 @@ export default function Scanner() {
   const [history, setHistory] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState<boolean>(false);
 
-  // Load history on startup
   useEffect(() => {
     const saved = localStorage.getItem('scannerHistory');
     if (saved) {
@@ -92,7 +103,6 @@ export default function Scanner() {
 
   const saveToHistory = (newScan: string) => {
     setHistory(prev => {
-      // Remove duplicate if it exists, add to front, keep only last 10
       const updated = [newScan, ...prev.filter(item => item !== newScan)].slice(0, 10);
       localStorage.setItem('scannerHistory', JSON.stringify(updated));
       return updated;
@@ -142,7 +152,7 @@ export default function Scanner() {
               if ('vibrate' in navigator) navigator.vibrate([200]);
               const text = results[0].text;
               setScanResult(text);
-              saveToHistory(text); // Save to local storage
+              saveToHistory(text);
               setIsScanning(false);
             }
           } catch (e: any) {}
@@ -154,14 +164,32 @@ export default function Scanner() {
     return () => cancelAnimationFrame(animationFrameId);
   }, [isScanning, showHistory]);
 
-  const copyToClipboard = async (textToCopy: string) => {
-    await navigator.clipboard.writeText(textToCopy);
+  const handleCopy = async (textToCopy: string) => {
+    const formattedText = formatForExport(textToCopy);
+    await navigator.clipboard.writeText(formattedText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleShare = async (textToShare: string) => {
+    const formattedText = formatForExport(textToShare);
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Scanned Data',
+          text: formattedText,
+        });
+      } catch (err) {
+        console.error('Error sharing:', err);
+      }
+    } else {
+      alert('Sharing is not supported on this device/browser.');
+    }
+  };
+
   const parsedData = scanResult ? parseQRData(scanResult) : null;
   const isUrl = scanResult?.startsWith('http://') || scanResult?.startsWith('https://');
+  const canShare = 'share' in navigator;
 
   return (
     <div className="flex flex-col items-center justify-between min-h-screen bg-slate-950 text-white p-4 relative">
@@ -217,13 +245,20 @@ export default function Scanner() {
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => copyToClipboard(scanResult)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm border border-slate-700">
+              <button onClick={() => handleCopy(scanResult)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm border border-slate-700">
                 {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                 {copied ? 'Copied' : 'Copy'}
               </button>
+              
+              {canShare && (
+                <button onClick={() => handleShare(scanResult)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm border border-slate-700">
+                  <Share className="w-4 h-4" /> Share
+                </button>
+              )}
+
               {isUrl && (
                 <a href={scanResult} target="_blank" rel="noopener noreferrer" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm">
-                  <ExternalLink className="w-4 h-4" /> Open Link
+                  <ExternalLink className="w-4 h-4" /> Open
                 </a>
               )}
             </div>
@@ -269,11 +304,16 @@ export default function Scanner() {
                   <div key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col gap-2">
                     <p className="text-sm font-mono text-slate-300 break-all line-clamp-2">{item}</p>
                     <div className="flex gap-2 mt-1">
-                      <button onClick={() => copyToClipboard(item)} className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded flex items-center gap-1.5 text-slate-300">
+                      <button onClick={() => handleCopy(item)} className="flex-1 text-xs bg-slate-800 hover:bg-slate-700 py-1.5 rounded flex items-center justify-center gap-1.5 text-slate-300">
                         <Copy className="w-3.5 h-3.5" /> Copy
                       </button>
+                      {canShare && (
+                        <button onClick={() => handleShare(item)} className="flex-1 text-xs bg-slate-800 hover:bg-slate-700 py-1.5 rounded flex items-center justify-center gap-1.5 text-slate-300">
+                          <Share className="w-3.5 h-3.5" /> Share
+                        </button>
+                      )}
                       {isItemUrl && (
-                        <a href={item} target="_blank" rel="noopener noreferrer" className="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 px-3 py-1.5 rounded flex items-center gap-1.5">
+                        <a href={item} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 py-1.5 rounded flex items-center justify-center gap-1.5">
                           <ExternalLink className="w-3.5 h-3.5" /> Open
                         </a>
                       )}
