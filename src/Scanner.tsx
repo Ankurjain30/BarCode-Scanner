@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { Camera, RefreshCw, CheckCircle, AlertCircle, Copy, ExternalLink, Check } from 'lucide-react';
 import { readBarcodesFromImageData } from 'zxing-wasm';
 
 export default function Scanner() {
@@ -8,6 +8,7 @@ export default function Scanner() {
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState<boolean>(true);
+  const [copied, setCopied] = useState<boolean>(false);
 
   // 1. Start Camera Feed
   useEffect(() => {
@@ -60,11 +61,18 @@ export default function Scanner() {
           try {
             const results = await readBarcodesFromImageData(imageData);
             if (results && results.length > 0) {
+              // Trigger phone vibration for a native feel
+              if ('vibrate' in navigator) {
+                navigator.vibrate(200);
+              }
+              
               setScanResult(results[0].text);
               setIsScanning(false); // Pause scanning on success
             }
-          } catch (e) {
-            // Scanning in progress, ignore frame-level decode errors silently
+          } catch (e: any) {
+            if (e.message && !e.message.toLowerCase().includes('not found')) {
+              console.error("Engine Error:", e);
+            }
           }
         }
       }
@@ -85,8 +93,20 @@ export default function Scanner() {
 
   const resetScanner = () => {
     setScanResult(null);
+    setCopied(false);
     setIsScanning(true);
   };
+
+  const copyToClipboard = async () => {
+    if (scanResult) {
+      await navigator.clipboard.writeText(scanResult);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000); // Reset icon after 2 seconds
+    }
+  };
+
+  // Helper to check if the result is a clickable web link
+  const isUrl = scanResult?.startsWith('http://') || scanResult?.startsWith('https://');
 
   return (
     <div className="flex flex-col items-center justify-between min-h-screen bg-slate-950 text-white p-4">
@@ -98,7 +118,6 @@ export default function Scanner() {
         <p className="text-slate-400 text-xs mt-0.5">Point camera at any barcode or QR code</p>
       </header>
 
-      {/* Hidden canvas used to process frames for zxing-wasm */}
       <canvas ref={canvasRef} className="hidden" />
 
       <div className="relative w-full max-w-sm aspect-square bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 my-auto">
@@ -110,7 +129,6 @@ export default function Scanner() {
           className="w-full h-full object-cover"
         />
         
-        {/* Viewfinder overlay */}
         <div className="absolute inset-0 border-[28px] border-black/50 flex items-center justify-center pointer-events-none">
           <div className="w-44 h-44 border-2 border-purple-400 rounded-lg animate-pulse shadow-[0_0_15px_rgba(192,132,252,0.5)]"></div>
         </div>
@@ -125,17 +143,40 @@ export default function Scanner() {
 
       <div className="w-full max-w-sm mb-4">
         {scanResult ? (
-          <div className="bg-slate-900 border border-purple-500/50 p-4 rounded-xl shadow-lg">
-            <div className="flex items-center gap-2 text-purple-400 font-semibold mb-2 text-sm">
+          <div className="bg-slate-900 border border-purple-500/50 p-4 rounded-xl shadow-lg flex flex-col gap-3">
+            <div className="flex items-center gap-2 text-purple-400 font-semibold text-sm">
               <CheckCircle className="w-4 h-4" />
               <span>Scan Successful</span>
             </div>
-            <p className="bg-slate-950 p-3 rounded-lg text-xs break-all font-mono text-slate-200 border border-slate-800 max-h-28 overflow-y-auto">
+            
+            <p className="bg-slate-950 p-3 rounded-lg text-sm break-all font-mono text-slate-200 border border-slate-800 max-h-32 overflow-y-auto selection:bg-purple-500/30">
               {scanResult}
             </p>
+
+            <div className="flex gap-2">
+              <button 
+                onClick={copyToClipboard}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm border border-slate-700"
+              >
+                {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                {copied ? 'Copied!' : 'Copy Text'}
+              </button>
+
+              {isUrl && (
+                <a 
+                  href={scanResult}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm"
+                >
+                  <ExternalLink className="w-4 h-4" /> Open Link
+                </a>
+              )}
+            </div>
+
             <button 
               onClick={resetScanner}
-              className="mt-3 w-full bg-purple-600 hover:bg-purple-500 text-white font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm"
+              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 transition text-sm mt-1"
             >
               <RefreshCw className="w-4 h-4" /> Scan Another
             </button>
