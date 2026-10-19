@@ -12,7 +12,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'Universal PWA Barcode Scanner',
+        name: 'Universal Scanner',
         short_name: 'QR Scanner',
         description: 'High-performance universal barcode and QR code scanner PWA',
         theme_color: '#09090b',
