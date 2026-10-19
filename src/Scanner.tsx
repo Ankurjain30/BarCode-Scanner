@@ -198,6 +198,7 @@ export default function Scanner() {
           <Camera className="w-5 h-5 text-purple-400" /> Universal Scanner
         </h1>
         <p className="text-slate-400 text-xs mt-0.5">Point camera at any barcode or QR code</p>
+        <p className="text-slate-600 text-[10px] mt-1">Version {__APP_VERSION__}</p>
       </header>
 
       <canvas ref={canvasRef} className="hidden" />
